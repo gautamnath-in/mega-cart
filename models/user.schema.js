@@ -6,6 +6,8 @@ import bcrypt from 'bcryptjs';
 import JWT from 'jsonwebtoken';
 import crypto from 'crypto';
 
+import config from "../config/index";
+
 const userSchema = mongoose.Schema(
     {
         name: {
@@ -46,5 +48,27 @@ userSchema.pre('save', async function (next) { //i.e., before save do the fn tas
 
     next();
 })
+
+// add more features directly to our Schema
+userSchema.methods = {
+    //compare Password
+    comparePassword : async function (enteredPassword) {
+        return await bcrypt.compare(enteredPassword, this.password)
+    },
+
+    //generate JWT Token
+    getJwtToken: function () {
+        return JWT.sign(
+            {
+                _id: this._id,
+                role: this.role
+            },
+            config.JWT_SECRET,// 'good-secret'
+            {
+                expiresIn: config.JWT_EXPIRY
+            }
+        )
+    }
+}
 
 export default mongoose.model('User', userSchema); //users in mongo
