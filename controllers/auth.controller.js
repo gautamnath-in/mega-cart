@@ -5,6 +5,8 @@ import customError from '../utils/customError';
 
 import mailHelper from '../utils/mailHelper';
 
+import crypto from 'crypto'; //to encrpt and compare token
+
 export const cookieOptions = {
     expires: new Date(Date.now() + 4 * 24 * 60 * 60 * 1000),
     httpOnly: true
@@ -74,7 +76,7 @@ export const login = asyncHandler(async (req, res) => {
         throw new customError('Please fill all the fields', 400)
     }
 
-    const user = User.findOne({ email }).select('+password');
+    const user = await User.findOne({ email }).select('+password');
 
     if (!user) {
         throw new customError('Invalid User', 400)
@@ -129,7 +131,7 @@ export const logout = asyncHandler(async (_req, res) => { //_req -> coz not used
 **/
 export const forgotPassword = asyncHandler(async (req, res) => {
     const { email } = req.body;
-    const user = User.findOne({ email });
+    const user = await User.findOne({ email });
     //TODO: Check email for null or ""
     if (!user) {
         throw new customError('User Not found', 404)
@@ -171,3 +173,58 @@ export const forgotPassword = asyncHandler(async (req, res) => {
 
     }
 });
+
+/**
+
+* @RESET_Password
+* @route http://localhost:5000/api/auth/password/reset/:resetToken
+* @description User will be able to reset password based on URL Token
+* @parameters token from url, password and confirm password
+* @return User object
+
+**/
+
+export const resetPassword = asyncHandler(async (req, res) => {
+    const { token: resetToken } = req.params;
+    const { password, confirmPassword } = req.body;
+
+    const resetPasswordToken = crypto
+        .createHash('sha256')
+        .update(resetToken)
+        .digest('hex');
+
+    const user = await User.findOne({
+        // email:email
+        forgotPasswordToken: resetPasswordToken,
+        forgotPasswordExpiry: { $gt: Date.now() } //gt->greater than now (coz we sat the time ahead 20 mins in future)
+        
+    })
+
+    if (!user) {
+        throw new customError('Password Token is invalid or Expired',400)
+    }
+    
+    if (password !== confirmPassword) {
+        throw new customError('Password and Confirm Password doesn"t match',400)
+    }
+
+    user.password = password;
+    user.forgotPasswordToken = undefined;
+    user.forgotPasswordExpiry = undefined;
+
+    await user.save() //pass is encrypted in Schema
+
+    //create a Token and send as response
+    const token = user.getJwtToken();
+
+    user.password = undefined;
+
+    //helper method for cookie can be added
+    res.cookie('token', token, cookieOptions);
+    res.status(200).json({
+        success: true,
+        user
+    })
+})
+
+//TODO: Create a Controller for Change Password
