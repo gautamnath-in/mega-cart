@@ -3,6 +3,8 @@ import User from '../models/user.schema';
 import asyncHandler from '../services/asyncHandler';
 import customError from '../utils/customError';
 
+import mailHelper from '../utils/mailHelper';
+
 export const cookieOptions = {
     expires: new Date(Date.now() + 4 * 24 * 60 * 60 * 1000),
     httpOnly: true
@@ -21,14 +23,14 @@ export const cookieOptions = {
 
 export const signUp = asyncHandler(async (req, res) => {
     const { name, email, password } = req.body
-    
+
     if (!name || !email || !password) {
         throw new customError('Please fill all the fields', 400)
     }
 
     //check if user exists
 
-    const existingUser = await User.findOne({email})
+    const existingUser = await User.findOne({ email })
 
     if (existingUser) {
         throw new customError('User already exists', 400)
@@ -67,15 +69,15 @@ export const signUp = asyncHandler(async (req, res) => {
 
 export const login = asyncHandler(async (req, res) => {
     const { email, password } = req.body;
-    
+
     if (!email || !password) {
-        throw new customError('Please fill all the fields',400)
+        throw new customError('Please fill all the fields', 400)
     }
 
     const user = User.findOne({ email }).select('+password');
-    
+
     if (!user) {
-        throw new customError('Invalid User',400)
+        throw new customError('Invalid User', 400)
     }
 
     const isPasswordMatched = await user.comparePassword(password);
@@ -119,9 +121,53 @@ export const logout = asyncHandler(async (_req, res) => { //_req -> coz not used
 /**
 
 * @Forgot Password
-* @route http://localhost:5000/api/auth/logout
-* @description User logout by clearing user cookies
-* @parameters
-* @return success message
+* @route http://localhost:5000/api/auth/password/forgot
+* @description User will submit email and we will generate a token
+* @parameters email
+* @return success message - email sent
 
 **/
+export const forgotPassword = asyncHandler(async (req, res) => {
+    const { email } = req.body;
+    const user = User.findOne({ email });
+    //TODO: Check email for null or ""
+    if (!user) {
+        throw new customError('User Not found', 404)
+    }
+
+    const resetToken = user.generateForgotPasswordToken();
+    //save to DB
+    // user.save() //this will demand all the vaildation fields
+
+    await user.save({ validateBeforeSave: false })
+
+    //send user the email
+
+    const resetURL =
+        // `https://gautamnath.in` from express below
+        `${req.protocol}://${req.get("host")}/api/auth/password/reset/${resetToken}`;
+
+    const text = `Your Password reset URL is \n\n ${resetURL}`
+
+    try {
+        await mailHelper({
+            email: user.email,
+            subject: "Password reset email for website",
+            text: text
+        })
+
+        res.status(200).json({
+            success: true,
+            message: `Email Sent to ${user.email}`
+        })
+    } catch (error) {
+        //roll-back clear fields and save
+        user.forgotPasswordToken = undefined;
+        user.forgotPasswordExpiry = undefined;
+
+        await user.save({ validateBeforeSave: false });
+
+        throw new customError(error.message || 'Email was not sent', 500);
+
+    }
+});
